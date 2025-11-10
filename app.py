@@ -1,15 +1,24 @@
 import streamlit as st
 from datetime import datetime
 from io import BytesIO
-from docx import Document
 import re
 
-st.set_page_config(page_title="舆情快报", layout="centered")
+# ---- 安全导入 docx ----
+try:
+    from docx import Document
+except ModuleNotFoundError:
+    st.error("❌ 缺少依赖：python-docx。请在仓库中添加 requirements.txt 文件并包含 'python-docx'。")
+    st.stop()
+
+# ---- 页面配置 ----
+st.set_page_config(page_title="舆情快报自动生成系统", layout="centered")
 
 TITLE = "舆情快报"
 SECTION_INDENT = "　　"
 
+# ---- 基础函数 ----
 def ensure_period(text: str) -> str:
+    """若结尾无句号则自动补全。"""
     text = text.strip()
     if not text:
         return ""
@@ -18,10 +27,22 @@ def ensure_period(text: str) -> str:
     return text + "。"
 
 def validate_time_hms(t: str) -> bool:
+    """验证 00:00:00 格式"""
     return bool(re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$", t.strip()))
 
 def validate_time_hm(t: str) -> bool:
+    """验证 00:00 格式"""
     return bool(re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", t.strip()))
+
+def make_docx(report_text: str) -> bytes:
+    """生成 DOCX 文件"""
+    doc = Document()
+    for line in report_text.split("\n"):
+        doc.add_paragraph(line)
+    bio = BytesIO()
+    doc.save(bio)
+    bio.seek(0)
+    return bio.read()
 
 def build_report(date_obj, time_str, platform, author, author_id, region, other_region,
                  content, count, likes, comments, spread_extra,
@@ -70,19 +91,10 @@ def build_report(date_obj, time_str, platform, author, author_id, region, other_
 
     return f"{TITLE}\n{part1}\n{part2}\n{part3}\n{part4}"
 
-def make_docx(report_text: str) -> bytes:
-    doc = Document()
-    doc.add_paragraph(TITLE)
-    for line in report_text.split("\n")[1:]:
-        doc.add_paragraph(line)
-    bio = BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-    return bio.read()
+# ---- Streamlit 页面 ----
+st.title("🧾 舆情快报自动生成系统（V3.5）")
 
-st.title("🧾 舆情快报自动生成系统（V3.4）")
-
-# --- 1. 基本情况 ---
+# --- 一、基本情况 ---
 st.subheader("一、基本情况")
 
 col1, col2 = st.columns(2)
@@ -103,7 +115,7 @@ if region == "其他":
 
 content = st.text_area("视频/帖文主要内容（简要描述）")
 
-# --- 2. 传播情况 ---
+# --- 二、传播情况 ---
 st.subheader("二、传播情况")
 col3, col4, col5 = st.columns(3)
 with col3:
@@ -114,7 +126,7 @@ with col5:
     comments = st.text_input("累计评论条数")
 spread_extra = st.text_area("传播补充说明（如媒体转发、话题热度等）")
 
-# --- 3. 工作措施 ---
+# --- 三、工作措施 ---
 st.subheader("三、工作措施")
 assigned_to = st.text_input("交办对象（如某区/镇/部门）")
 has_order = st.checkbox("是否下发网络舆情交办单")
@@ -124,12 +136,11 @@ deleted = st.checkbox("是否已删除")
 delete_time = ""
 delete_type = "贴文"
 
-# ✅ 动态展开逻辑（不需要重新提交）
 if deleted:
     delete_type = st.selectbox("选择贴文类型", ["视频", "图文", "评论", "综合内容"])
     delete_time = st.text_input("删除时间（格式：00:00，例如09:22）", "")
 
-# --- 指导意见模板 ---
+# --- 指导意见 ---
 st.markdown("**指导意见内容（可选/可改）：**")
 guidance_options = {
     "常规处置建议": "近期类似情况多发，建议各县（市、区）职能部门加强对于此类现象的现场管控和线下疏导。",
@@ -144,11 +155,11 @@ if guidance_choice == "自定义":
 else:
     guidance_text = guidance_options[guidance_choice]
 
-# --- 4. 链接信息 ---
+# --- 四、链接信息 ---
 st.subheader("四、链接信息")
 links = st.text_area("视频或帖文链接（多条可用逗号分隔）")
 
-# --- 提交 ---
+# --- 生成按钮 ---
 if st.button("✨ 生成舆情快报"):
     if not author.strip() or not content.strip():
         st.error("请填写【发布者昵称】和【主要内容】。")
@@ -165,19 +176,12 @@ if st.button("✨ 生成舆情快报"):
         st.success("✅ 已生成舆情快报")
         st.code(report, language="markdown")
 
-        st.download_button(
-            "💾 下载 TXT",
-            data=report.encode("utf-8"),
-            file_name="舆情快报.txt",
-            mime="text/plain"
-        )
+        st.download_button("💾 下载 TXT", data=report.encode("utf-8"),
+                           file_name="舆情快报.txt", mime="text/plain")
 
         docx_bytes = make_docx(report)
-        st.download_button(
-            "💾 下载 DOCX",
-            data=docx_bytes,
-            file_name="舆情快报.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        st.download_button("💾 下载 DOCX", data=docx_bytes,
+                           file_name="舆情快报.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-st.caption("V3.4版：勾选“是否已删除”后自动展开‘贴文类型’与‘删除时间’；支持指导意见模板与自定义输入。")
+st.caption("V3.5版：优化错误提示、自动补句号、指导意见模板+自定义可共存、增强云端兼容性。")
